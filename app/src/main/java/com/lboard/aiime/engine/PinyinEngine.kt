@@ -15,13 +15,23 @@ class PinyinEngine {
     var isChineseMode: Boolean = true
         private set
 
+    /** 是否开启大写/Shift */
+    var isShifted: Boolean = false
+        private set
+
     /**
      * 输入一个字母
      * @return 更新后的候选词列表
      */
     fun inputLetter(letter: Char): PinyinState {
-        inputBuffer.append(letter.lowercaseChar())
-        candidates = PinyinDictionary.lookup(inputBuffer.toString())
+        // 中文模式下始终存入小写进行匹配
+        if (isChineseMode) {
+            inputBuffer.append(letter.lowercaseChar())
+            candidates = PinyinDictionary.lookup(inputBuffer.toString())
+        } else {
+            // 英文模式直接追加（IME 会处理大小写逻辑，但 buffer 记录原始输入）
+            inputBuffer.append(letter)
+        }
         return getCurrentState()
     }
 
@@ -32,7 +42,7 @@ class PinyinEngine {
     fun deleteLastInput(): PinyinState {
         if (inputBuffer.isNotEmpty()) {
             inputBuffer.deleteCharAt(inputBuffer.length - 1)
-            candidates = if (inputBuffer.isNotEmpty()) {
+            candidates = if (inputBuffer.isNotEmpty() && isChineseMode) {
                 PinyinDictionary.lookup(inputBuffer.toString())
             } else {
                 emptyList()
@@ -43,8 +53,6 @@ class PinyinEngine {
 
     /**
      * 选择候选词
-     * @param index 候选词索引
-     * @return 被选中的文字，null 表示索引无效
      */
     fun selectCandidate(index: Int): String? {
         if (index < 0 || index >= candidates.size) return null
@@ -78,11 +86,11 @@ class PinyinEngine {
     }
 
     /**
-     * 设置输入模式
+     * 切换 Shift 状态
      */
-    fun setChineseMode(enabled: Boolean) {
-        isChineseMode = enabled
-        clearInput()
+    fun toggleShift(): Boolean {
+        isShifted = !isShifted
+        return isShifted
     }
 
     /**
@@ -92,7 +100,8 @@ class PinyinEngine {
         return PinyinState(
             inputPinyin = inputBuffer.toString(),
             candidates = candidates,
-            isChineseMode = isChineseMode
+            isChineseMode = isChineseMode,
+            isShifted = isShifted
         )
     }
 
@@ -114,6 +123,7 @@ data class PinyinState(
     val inputPinyin: String = "",
     val candidates: List<String> = emptyList(),
     val isChineseMode: Boolean = true,
+    val isShifted: Boolean = false,
     val isAiLoading: Boolean = false,
     val hasAiCandidates: Boolean = false,
     val isVoiceListening: Boolean = false,

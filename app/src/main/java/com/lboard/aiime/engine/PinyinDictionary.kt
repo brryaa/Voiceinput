@@ -2,13 +2,9 @@ package com.lboard.aiime.engine
 
 /**
  * 拼音词典 — 内嵌高频汉字/词组映射
- * 后续可扩展为外部词库文件加载
  */
 object PinyinDictionary {
 
-    /**
-     * 拼音 -> 候选字/词列表（按频率排序）
-     */
     private val dictionary: Map<String, List<String>> by lazy {
         buildMap {
             // ===== 高频单字 =====
@@ -77,6 +73,8 @@ object PinyinDictionary {
             put("ding", listOf("定", "顶", "丁", "盯", "订", "钉", "鼎"))
             put("diu", listOf("丢"))
             put("dong", listOf("动", "东", "懂", "冬", "洞", "冻", "栋", "董"))
+            put("dongx", listOf("东", "懂"))
+            put("dongxi", listOf("东西"))
             put("dou", listOf("都", "斗", "豆", "逗", "抖", "兜", "陡", "窦"))
             put("du", listOf("都", "度", "读", "独", "毒", "杜", "堵", "肚", "渡"))
             put("duan", listOf("段", "短", "断", "端", "锻"))
@@ -102,14 +100,14 @@ object PinyinDictionary {
             put("gan", listOf("干", "敢", "感", "赶", "甘", "肝", "杆", "柑"))
             put("gang", listOf("刚", "钢", "港", "岗", "纲", "缸", "杠"))
             put("gao", listOf("高", "搞", "告", "稿", "膏", "糕"))
-            put("ge", listOf("个", "各", "哥", "歌", "格", "隔", "革", "阁", "割"))
+            put("ge", listOf("个", "各", "哥", "歌", "格", "隔", "革", "阁", "阁", "割"))
             put("gei", listOf("给"))
             put("gen", listOf("根", "跟", "亘"))
             put("geng", listOf("更", "耕", "庚"))
             put("gong", listOf("工", "公", "功", "共", "供", "宫", "攻", "恭", "龚", "弓"))
             put("gou", listOf("够", "狗", "沟", "构", "购", "勾", "钩"))
             put("gu", listOf("古", "故", "顾", "骨", "谷", "鼓", "股", "固", "姑", "孤"))
-            put("gua", listOf("瓜", "挂", "刮", "寡", "卦"))
+            put("gua", listOf("瓜", "挂", "刮", "小", "卦"))
             put("guai", listOf("怪", "乖", "拐"))
             put("guan", listOf("关", "管", "官", "观", "馆", "冠", "惯", "灌", "贯"))
             put("guang", listOf("光", "广", "逛"))
@@ -119,7 +117,7 @@ object PinyinDictionary {
 
             put("ha", listOf("哈", "蛤"))
             put("hai", listOf("还", "海", "害", "孩", "嗨"))
-            put("han", listOf("汉", "寒", "含", "喊", "韩", "旱", "汗", "函", "涵"))
+            put("han", listOf("汉", "寒", "含", "喊", "韩", "旱", "汗", "函", "函", "涵"))
             put("hang", listOf("行", "航", "杭"))
             put("hao", listOf("好", "号", "毫", "豪", "耗", "浩"))
             put("he", listOf("和", "合", "何", "河", "喝", "贺", "核", "赫", "荷", "盒", "禾"))
@@ -142,11 +140,11 @@ object PinyinDictionary {
             put("jian", listOf("见", "间", "建", "件", "将", "剑", "简", "检", "健", "减", "渐", "坚", "肩", "尖", "践", "荐", "鉴"))
             put("jiang", listOf("将", "江", "讲", "降", "酱", "奖", "姜", "僵", "疆", "浆"))
             put("jiao", listOf("叫", "教", "觉", "交", "脚", "角", "较", "骄", "焦", "胶", "搅"))
-            put("jie", listOf("就", "接", "结", "解", "界", "姐", "阶", "借", "节", "洁", "揭", "截", "届", "杰"))
+            put("jie", listOf("接", "结", "解", "界", "姐", "阶", "借", "节", "洁", "揭", "截", "届", "杰"))
             put("jin", listOf("进", "今", "金", "近", "紧", "尽", "仅", "禁", "锦", "津", "筋"))
             put("jing", listOf("经", "精", "京", "惊", "景", "静", "境", "竟", "敬", "净", "镜", "晶", "井"))
             put("jiu", listOf("就", "九", "久", "酒", "旧", "究", "救", "纠"))
-            put("ju", listOf("就", "举", "具", "句", "据", "距", "局", "居", "巨", "拒", "俱", "剧"))
+            put("ju", listOf("举", "具", "句", "据", "距", "局", "居", "巨", "拒", "俱", "剧"))
             put("juan", listOf("卷", "倦", "绢", "娟", "圈"))
             put("jue", listOf("觉", "决", "绝", "角", "掘", "倔", "爵"))
             put("jun", listOf("军", "均", "君", "俊", "菌", "骏"))
@@ -183,7 +181,7 @@ object PinyinDictionary {
             put("liao", listOf("了", "料", "聊", "辽", "廖", "疗"))
             put("lie", listOf("列", "烈", "裂", "猎", "劣"))
             put("lin", listOf("林", "临", "邻", "淋"))
-            put("ling", listOf("领", "令", "另", "灵", "零", "铃", "凌", "陵", "岭"))
+            put("ling", listOf("领", "另", "灵", "零", "铃", "凌", "陵", "岭"))
             put("liu", listOf("六", "流", "留", "刘", "柳", "溜"))
             put("long", listOf("龙", "隆", "聋", "笼", "弄"))
             put("lou", listOf("楼", "漏", "搂", "露", "陋"))
@@ -221,7 +219,8 @@ object PinyinDictionary {
             put("nen", listOf("嫩"))
             put("neng", listOf("能"))
             put("ni", listOf("你", "呢", "泥", "逆", "拟", "匿", "腻"))
-            put("nian", listOf("年", "念", "粘", "娘", "酿"))
+            put("nihao", listOf("你好"))
+            put("nian", listOf("年", "念", "粘"))
             put("niang", listOf("娘", "酿"))
             put("niao", listOf("鸟", "尿"))
             put("nie", listOf("捏", "涅", "镊"))
@@ -345,11 +344,12 @@ object PinyinDictionary {
             put("wen", listOf("问", "文", "闻", "温", "稳", "吻", "纹"))
             put("weng", listOf("翁", "嗡"))
             put("wo", listOf("我", "握", "窝", "卧"))
+            put("women", listOf("我们"))
             put("wu", listOf("五", "无", "物", "武", "误", "务", "悟", "吴", "屋", "舞", "雾", "午"))
 
             put("xi", listOf("西", "希", "系", "细", "洗", "席", "习", "喜", "戏", "息", "吸", "析", "溪", "牺"))
             put("xia", listOf("下", "夏", "吓", "虾", "瞎", "峡", "侠", "狭"))
-            put("xian", listOf("先", "现", "线", "见", "显", "鲜", "险", "限", "县", "仙", "闲", "咸", "贤", "嫌", "献"))
+            put("xian", listOf("先", "现", "线", "显", "鲜", "险", "限", "县", "仙", "闲", "咸", "贤", "嫌", "献"))
             put("xiang", listOf("想", "向", "像", "象", "相", "响", "香", "乡", "箱", "详", "享", "项"))
             put("xiao", listOf("小", "笑", "校", "消", "效", "晓", "萧", "销", "肖"))
             put("xie", listOf("写", "些", "谢", "鞋", "血", "协", "斜", "携", "泄", "歇", "邪"))
@@ -384,7 +384,7 @@ object PinyinDictionary {
             put("zao", listOf("早", "造", "遭", "糟", "灶", "噪", "燥", "枣", "藻"))
             put("ze", listOf("则", "责", "择", "泽"))
             put("zen", listOf("怎"))
-            put("zeng", listOf("增", "曾", "赠", "憎"))
+            put("zeng", listOf("增", "曾", "赠", "赠", "憎"))
             put("zha", listOf("扎", "炸", "渣", "闸", "眨", "榨", "诈", "乍"))
             put("zhai", listOf("摘", "宅", "窄", "债", "寨"))
             put("zhan", listOf("站", "占", "展", "战", "张", "粘", "沾", "盏", "斩"))
@@ -425,7 +425,6 @@ object PinyinDictionary {
             put("laoshi", listOf("老师"))
             put("pengyou", listOf("朋友"))
             put("gongzuo", listOf("工作"))
-            put("shenghua", listOf("生活"))
             put("shenghuo", listOf("生活"))
             put("dianhua", listOf("电话"))
             put("diannao", listOf("电脑"))
@@ -502,27 +501,22 @@ object PinyinDictionary {
      */
     fun lookup(pinyin: String): List<String> {
         val lower = pinyin.lowercase()
+        val results = mutableListOf<String>()
+
         // 1. 精确匹配
-        dictionary[lower]?.let { return it }
+        dictionary[lower]?.let { results.addAll(it) }
 
-        // 2. 前缀匹配 — 收集所有以该拼音开头的条目
-        val prefixResults = mutableListOf<String>()
-        dictionary.forEach { (key, values) ->
-            if (key.startsWith(lower) && key != lower) {
-                prefixResults.addAll(values.take(3))
-            }
+        // 2. 增强型前缀匹配 (联想功能)
+        // 遍历词典，寻找所有以当前输入为前缀的词
+        // 优先显示长度接近的词
+        val prefixMatches = dictionary.filterKeys { it.startsWith(lower) && it != lower }
+            .toList()
+            .sortedBy { it.first.length } // 按长度排序，先出短的联想
+
+        prefixMatches.forEach { (_, words) ->
+            results.addAll(words.take(2))
         }
-        return prefixResults.distinct().take(20)
-    }
 
-    /**
-     * 获取所有可能的拼音补全
-     */
-    fun getCompletions(prefix: String): List<String> {
-        val lower = prefix.lowercase()
-        return dictionary.keys
-            .filter { it.startsWith(lower) }
-            .sorted()
-            .take(10)
+        return results.distinct().take(20)
     }
 }
