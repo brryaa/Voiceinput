@@ -4,7 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.inputmethodservice.InputMethodService
 import android.view.View
-import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.*
 import androidx.compose.ui.platform.ComposeView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -21,9 +21,11 @@ import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.lvoice.aiime.auth.GeminiAuthManager
 import com.lvoice.aiime.data.UserPreferences
 import com.lvoice.aiime.ime.keyboard.VoiceScreen
+import com.lvoice.aiime.voice.GeminiVoiceClient
 import com.lvoice.aiime.voice.VoiceInputManager
 import com.lvoice.aiime.voice.VoiceState
 import kotlinx.coroutines.*
+import java.io.File
 
 class LvoiceIME : InputMethodService(), LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner {
 
@@ -40,12 +42,18 @@ class LvoiceIME : InputMethodService(), LifecycleOwner, SavedStateRegistryOwner,
     private lateinit var voiceInputManager: VoiceInputManager
     private lateinit var userPreferences: UserPreferences
     private lateinit var authManager: GeminiAuthManager
+    private var geminiVoiceClient: GeminiVoiceClient? = null
+    
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-
+    private var stateObserverJob: Job? = null
     private var hasActiveSession = false
+    
+    private var lastDraftLength = 0
+    private val _isRefining = mutableStateOf(false)
 
     override fun onCreate() {
         super.onCreate()
+        android.util.Log.d("LvoiceIME", "onCreate")
         
         savedStateRegistryController.performRestore(null)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
@@ -57,43 +65,89 @@ class LvoiceIME : InputMethodService(), LifecycleOwner, SavedStateRegistryOwner,
         // Sync settings
         scope.launch {
             userPreferences.geminiApiKeyFlow.collect { apiKey ->
-                val authMethod = userPreferences.getAuthMethod()
-                val idToken = authManager.getIdToken()
-                voiceInputManager.updateSettings(apiKey, authMethod, idToken)
+                if (apiKey.isNotBlank()) {
+                    geminiVoiceClient = GeminiVoiceClient(apiKey)
+                }
             }
         }
 
-        // Handle transcription result (Continuous mode: one sentence finished)
-        voiceInputManager.onFinalResult = { text ->
-            if (text.isNotBlank()) {
-                currentInputConnection?.commitText(text, 1)
+        // Handle transcription result
+        voiceInputManager.onFinalResult = { draftText, audioFile ->
+            if (draftText.isNotBlank()) {
+                currentInputConnection?.commitText(draftText, 1)
+                lastDraftLength = draftText.length
+                
+                if (audioFile != null && geminiVoiceClient != null) {
+                    refineWithGemini(audioFile, draftText)
+                }
             }
-            // NO auto-switch here, wait for Idle
         }
+    }
 
-        // Observe VoiceState for session completion
-        scope.launch {
+    private fun startObservingState() {
+        stateObserverJob?.cancel()
+        stateObserverJob = scope.launch {
             voiceInputManager.state.collect { state ->
+                android.util.Log.d("LvoiceIME", "Observed state: $state, currentSessionActive=$hasActiveSession")
                 when (state) {
-                    is VoiceState.Listening, is VoiceState.PartialResult, is VoiceState.Result -> {
+                    is VoiceState.Listening -> {
                         hasActiveSession = true
+                        android.util.Log.d("LvoiceIME", "Session confirmed active")
+                    }
+                    is VoiceState.PartialResult, is VoiceState.Result -> {
+                        // Keep hasActiveSession = true
                     }
                     is VoiceState.Idle -> {
                         if (hasActiveSession) {
-                            // Session ended via timeout (1200ms) or stop
-                            android.util.Log.d("LvoiceIME", "Voice session IDLE, switching back...")
+                            android.util.Log.d("LvoiceIME", "Session reached Idle. Preparing auto-exit...")
                             hasActiveSession = false
-                            delay(500) // Brief delay to show final result if any
-                            switchToPreviousInputMethod()
+                            
+                            scope.launch {
+                                var retry = 0
+                                // 等待精修完成，或者等待文字被 commit
+                                while (_isRefining.value && retry < 25) { 
+                                    delay(100)
+                                    retry++
+                                }
+                                android.util.Log.d("LvoiceIME", "Switching back after refinement/timeout (retry=$retry)")
+                                delay(200)
+                                switchToPreviousInputMethod()
+                            }
                         }
                     }
                     is VoiceState.Error -> {
+                        android.util.Log.e("LvoiceIME", "Session error: ${state.message}")
                         hasActiveSession = false
-                        // Keep the error on screen for a moment
-                        delay(2000)
+                        delay(1500)
                         switchToPreviousInputMethod()
                     }
                 }
+            }
+        }
+    }
+
+    private fun refineWithGemini(audioFile: File, draftText: String) {
+        // 使用 GlobalScope 确保纠偏过程不会因为 IME 实例被销毁而取消
+        @OptIn(DelicateCoroutinesApi::class)
+        GlobalScope.launch(Dispatchers.Main) {
+            _isRefining.value = true
+            try {
+                android.util.Log.d("LvoiceIME", "Refinement started for: '$draftText'")
+                val refinedText = geminiVoiceClient?.refineSTT(audioFile, draftText)
+                
+                if (refinedText != null && refinedText != draftText && refinedText.isNotBlank()) {
+                    android.util.Log.d("LvoiceIME", "Applying refined text: '$refinedText'")
+                    currentInputConnection?.let { conn ->
+                        conn.deleteSurroundingText(lastDraftLength, 0)
+                        conn.commitText(refinedText, 1)
+                    } ?: android.util.Log.e("LvoiceIME", "InputConnection null, refinement lost")
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("LvoiceIME", "Refinement launch exception", e)
+            } finally {
+                _isRefining.value = false
+                audioFile.delete()
+                android.util.Log.d("LvoiceIME", "Refinement task finished")
             }
         }
     }
@@ -125,8 +179,7 @@ class LvoiceIME : InputMethodService(), LifecycleOwner, SavedStateRegistryOwner,
                         }
                     },
                     onCloseClick = {
-                        hasActiveSession = false
-                        voiceInputManager.cancel()
+                        cleanupSession()
                         switchToPreviousInputMethod()
                     }
                 )
@@ -137,38 +190,46 @@ class LvoiceIME : InputMethodService(), LifecycleOwner, SavedStateRegistryOwner,
 
     override fun onWindowShown() {
         super.onWindowShown()
+        android.util.Log.d("LvoiceIME", "onWindowShown")
         if (!lifecycleRegistry.currentState.isAtLeast(Lifecycle.State.STARTED)) {
             lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
             lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
         }
         
-        hasActiveSession = false // Reset for new entry
+        // 关键：每次显示窗口都强制重置状态，并开始观察
+        hasActiveSession = false
+        startObservingState()
         startVoiceInput()
     }
 
     override fun onWindowHidden() {
         super.onWindowHidden()
+        android.util.Log.d("LvoiceIME", "onWindowHidden")
         if (lifecycleRegistry.currentState.isAtLeast(Lifecycle.State.STARTED)) {
             lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
             lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
         }
-        scope.launch {
-            hasActiveSession = false
-            voiceInputManager.cancel()
-        }
+        cleanupSession()
+    }
+
+    private fun cleanupSession() {
+        hasActiveSession = false
+        stateObserverJob?.cancel()
+        voiceInputManager.forceStop()
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        android.util.Log.d("LvoiceIME", "onDestroy")
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         store.clear()
+        cleanupSession()
         scope.cancel()
         voiceInputManager.destroy()
     }
 
     private fun startVoiceInput() {
         val hasPermission = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-        
         if (hasPermission) {
             voiceInputManager.startListening(true)
         } else {

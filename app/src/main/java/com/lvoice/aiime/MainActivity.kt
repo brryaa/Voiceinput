@@ -204,6 +204,18 @@ fun SetupScreen(
                 }
             )
 
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Step 5: 诊断工具
+            DiagnosticCard(
+                onSniffModels = {
+                    coroutineScope.launch {
+                        val sniffer = com.lvoice.aiime.ai.ModelSniffer(userPreferences, authManager)
+                        sniffer.sniffModels()
+                    }
+                }
+            )
+
             Spacer(modifier = Modifier.height(32.dp))
 
             FeaturePreviewSection()
@@ -398,6 +410,77 @@ private fun ApiKeyCard(
                     lineHeight = 18.sp
                 )
             }
+        }
+    }
+}
+
+// ========== 诊断工具卡片 ==========
+
+@Composable
+private fun DiagnosticCard(
+    onSniffModels: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = SetupColors.cardBackground)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(SetupColors.accentPurple.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "🛠️",
+                        fontSize = 18.sp
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(16.dp))
+
+                Column {
+                    Text(
+                        text = "API 诊断工具",
+                        color = SetupColors.textPrimary,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "检查当前可用模型与能力",
+                        color = SetupColors.textSecondary,
+                        fontSize = 13.sp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Button(
+                onClick = onSniffModels,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = SetupColors.inputFieldBg)
+            ) {
+                Text("开始诊断 (结果输出至 Logcat)", color = SetupColors.accentBlue)
+            }
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            Text(
+                text = "点击后请在 Android Studio 的 Logcat 中搜索 'ModelSniffer' 查看结果。",
+                color = SetupColors.textSecondary,
+                fontSize = 12.sp,
+                lineHeight = 16.sp
+            )
         }
     }
 }
