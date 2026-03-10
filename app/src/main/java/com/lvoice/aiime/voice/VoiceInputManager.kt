@@ -130,23 +130,25 @@ class VoiceInputManager(private val context: Context) {
 
             if (lastValidTextTime == 0L) {
                 // 初期阶段：连半个有效字都没出来
+                // ★ 绝对免死金牌：前 3000ms 无论环境有多吵，无论发生什么，绝对不准因为“没字”而退出！
+                // 这给了用户充足的启动、缓冲、深呼吸和开口时间。
+                if (elapsedSinceStart < 3000L) return
+
                 if (hasSpeechStarted) {
                     // 听到了声音信号，但一直是噪音
-                    // 规则2: 听到语音没有识别文字 1.2s后退出
+                    // 规则2: 听到语音没有识别文字 1.2s后退出 (但有了免死金牌，最早也要等 3.0s 才能处决)
                     val elapsedSinceNoise = now - firstNoiseTime
                     if (elapsedSinceNoise >= 1200L) {
-                        Log.d("VoiceInputManager", "Watchdog Rule 2: Initial noise timeout (1.2s after noise) reached.")
+                        Log.d("VoiceInputManager", "Watchdog Rule 2: Initial noise timeout reached.")
                         forceStopAndIdle() // 完全没输入过有效文字，不用提词，直接暴力退出
                         return
                     }
                 } else {
                     // 安安静静什么都没听到
-                    // 规则1: 初始化后2s没有语音输入退出
-                    if (elapsedSinceStart >= 2000L) {
-                        Log.d("VoiceInputManager", "Watchdog Rule 1: Initial silence timeout (2s) reached.")
-                        forceStopAndIdle()
-                        return
-                    }
+                    // 规则1: 初始化无言超时 (也受金牌保护，所以真正执行时已经是 >= 3s 了)
+                    Log.d("VoiceInputManager", "Watchdog Rule 1: Initial silence timeout reached.")
+                    forceStopAndIdle()
+                    return
                 }
             } else {
                 // 已经有稳定的文字输出了
