@@ -26,7 +26,7 @@ sealed class VoiceState {
 }
 
 /**
- * 语音输入管理器 (Hybrid Version)
+ * 语音输入管理器 (Hybrid Version - Stable Watchdog)
  */
 class VoiceInputManager(private val context: Context) {
 
@@ -44,25 +44,30 @@ class VoiceInputManager(private val context: Context) {
     private var currentAudioFile: File? = null
     private var isStarting = false
     
-    // 我们需要一个绝对的定时器来管控所有超时，屏蔽底层引擎的差异
-    private var timeoutRunnable: Runnable? = null
-    private var hasReceivedValidTextThisSession = false
+    // --- 严苛的独立看门狗机制 (Watchdog Timer) ---
+    private var sessionStartTime = 0L
+    private var lastValidTextTime = 0L
+    private var firstNoiseTime = 0L
+    private var hasSpeechStarted = false
+    private var watchdogActive = false
     private var forceExitAfterResult = false // 用于强制终止并在 onResults 后彻底退出
+    
+    // 我们完全禁用底层的自动断句，把生死大权交给 Watchdog
+    private val NATIVE_TIMEOUT = 10000L
 
     fun isAvailable(): Boolean = SpeechRecognizer.isRecognitionAvailable(context)
 
     fun startListening(isChineseMode: Boolean = true) {
         language = if (isChineseMode) "zh-CN" else "en-US"
         isContinuousListening = true
-        hasReceivedValidTextThisSession = false
-        forceExitAfterResult = false
         isStarting = false
+        forceExitAfterResult = false
         
-        // 规则1：初始化后2s没有语音输入才退出 (Initial Silence)
-        startAbsoluteTimeout(2000L) {
-            Log.d("VoiceInputManager", "Rule 1: Initial 2s silence timeout reached.")
-            forceStopAndIdle()
-        }
+        sessionStartTime = System.currentTimeMillis()
+        lastValidTextTime = 0L
+        firstNoiseTime = 0L
+        hasSpeechStarted = false
+        startWatchdog()
         
         startRecognizer()
     }
@@ -73,7 +78,6 @@ class VoiceInputManager(private val context: Context) {
         
         mainHandler.post {
             try {
-                // 每次启动倾向使用新实例，防止部分机型底层死锁
                 speechRecognizer?.destroy()
                 speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
                     setRecognitionListener(recognitionListener)
@@ -87,10 +91,9 @@ class VoiceInputManager(private val context: Context) {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-                    // 放宽底层引擎的内部超时，将生命周期生死大权完全交接给我们的 absolute timer
-                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 4000L)
-                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 3000L)
-                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 4000L)
+                    // 完全放宽底层限制，防止系统误杀
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, NATIVE_TIMEOUT)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, NATIVE_TIMEOUT)
                 }
 
                 speechRecognizer?.startListening(intent)
@@ -104,35 +107,76 @@ class VoiceInputManager(private val context: Context) {
         }
     }
 
-    private fun startAbsoluteTimeout(delayMs: Long, action: () -> Unit) {
-        cancelAbsoluteTimeout()
-        Log.d("VoiceInputManager", "Starting absolute timeout: ${delayMs}ms")
-        timeoutRunnable = Runnable {
-            if (isContinuousListening) {
-                action()
-            }
-        }
-        mainHandler.postDelayed(timeoutRunnable!!, delayMs)
+    // ========== Watchdog Timer Logic ==========
+
+    private fun startWatchdog() {
+        watchdogActive = true
+        mainHandler.removeCallbacks(watchdogRunnable)
+        mainHandler.postDelayed(watchdogRunnable, 100)
     }
 
-    private fun cancelAbsoluteTimeout() {
-        timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
-        timeoutRunnable = null
+    private fun stopWatchdog() {
+        watchdogActive = false
+        mainHandler.removeCallbacks(watchdogRunnable)
     }
+
+    private val watchdogRunnable = object : Runnable {
+        override fun run() {
+            if (!watchdogActive || !isContinuousListening) return
+            
+            val now = System.currentTimeMillis()
+            val elapsedSinceStart = now - sessionStartTime
+            val elapsedSinceLastText = if (lastValidTextTime > 0) now - lastValidTextTime else 0L
+
+            if (lastValidTextTime == 0L) {
+                // 初期阶段：连半个有效字都没出来
+                if (hasSpeechStarted) {
+                    // 听到了声音信号，但一直是噪音
+                    // 规则2: 听到语音没有识别文字 1.2s后退出
+                    val elapsedSinceNoise = now - firstNoiseTime
+                    if (elapsedSinceNoise >= 1200L) {
+                        Log.d("VoiceInputManager", "Watchdog Rule 2: Initial noise timeout (1.2s after noise) reached.")
+                        forceStopAndIdle() // 完全没输入过有效文字，不用提词，直接暴力退出
+                        return
+                    }
+                } else {
+                    // 安安静静什么都没听到
+                    // 规则1: 初始化后2s没有语音输入退出
+                    if (elapsedSinceStart >= 2000L) {
+                        Log.d("VoiceInputManager", "Watchdog Rule 1: Initial silence timeout (2s) reached.")
+                        forceStopAndIdle()
+                        return
+                    }
+                }
+            } else {
+                // 已经有稳定的文字输出了
+                // 规则3 & 4 (语段间绝对超时)：有字之后，无论环境多吵，只要超过 1000ms 没有提取出新内容，强制断句！
+                if (elapsedSinceLastText >= 1000L) {
+                    Log.d("VoiceInputManager", "Watchdog Rule 3/4: Post-text stable silence/noise timeout (1s) reached.")
+                    stopListeningAndProcess() // 通知识别器收工，把草稿转正
+                    return
+                }
+            }
+
+            // 继续巡视
+            mainHandler.postDelayed(this, 100)
+        }
+    }
+
+    // ========== Session Management ==========
 
     fun stopListeningAndProcess() {
         isContinuousListening = false
         forceExitAfterResult = true
-        cancelAbsoluteTimeout()
+        stopWatchdog()
         audioRecorder.stopRecording()
         mainHandler.post {
-            speechRecognizer?.stopListening() // 强制结束以输出文字
+            speechRecognizer?.stopListening() // 强制进入 onResults 环节
         }
     }
 
     fun forceStopAndIdle() {
-        Log.d("VoiceInputManager", "forceStopAndIdle executing.")
-        cancelAbsoluteTimeout()
+        stopWatchdog()
         isContinuousListening = false
         audioRecorder.stopRecording()
         mainHandler.post {
@@ -143,8 +187,9 @@ class VoiceInputManager(private val context: Context) {
         }
     }
 
-    fun cancel() { forceStopAndIdle() }
-    fun destroy() { forceStopAndIdle() }
+    fun forceStop() = forceStopAndIdle()
+    fun cancel() = forceStopAndIdle()
+    fun destroy() = forceStopAndIdle()
 
     fun isListening(): Boolean = _state.value is VoiceState.Listening ||
             _state.value is VoiceState.PartialResult
@@ -158,18 +203,22 @@ class VoiceInputManager(private val context: Context) {
     private val recognitionListener = object : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) {
             _state.value = VoiceState.Listening
-        }
-
-        override fun onBeginningOfSpeech() {
-            // 规则2：首次听到声音（可能只是噪音），如果1.2s内没有识别出有效文字，强制退出
-            if (!hasReceivedValidTextThisSession) {
-                startAbsoluteTimeout(1200L) {
-                    Log.d("VoiceInputManager", "Rule 2: Initial 1.2s noise timeout reached (No valid text).")
-                    forceStopAndIdle()
-                }
+            // 每次准备好，把倒计时原点重置一下，免得开机卡顿吃掉时间
+            if (lastValidTextTime == 0L) {
+                sessionStartTime = System.currentTimeMillis()
+                firstNoiseTime = 0L
+                hasSpeechStarted = false
             }
         }
 
+        override fun onBeginningOfSpeech() {
+            if (!hasSpeechStarted) {
+                hasSpeechStarted = true
+                firstNoiseTime = System.currentTimeMillis()
+            }
+            Log.d("VoiceInputManager", "onBeginningOfSpeech detected noise/voice.")
+        }
+        
         override fun onRmsChanged(rmsdB: Float) {}
         override fun onBufferReceived(buffer: ByteArray?) {}
         override fun onEndOfSpeech() {}
@@ -177,54 +226,37 @@ class VoiceInputManager(private val context: Context) {
         override fun onError(error: Int) {
             val isTimeout = error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
             val isNoMatch = error == SpeechRecognizer.ERROR_NO_MATCH
-            
             Log.d("VoiceInputManager", "onError: $error (timeout=$isTimeout, noMatch=$isNoMatch)")
             
-            if (isTimeout) {
-                // 如果底层的纯静音超时真的触发了，直接强退（作为最后的兜底防护）
-                Log.d("VoiceInputManager", "Engine internal silence timeout reached, session end")
-                forceStopAndIdle()
-            } else if (isNoMatch || error == SpeechRecognizer.ERROR_CLIENT || error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || error == 11) {
-                // 短周期的环境噪音或者网络波动，只要我们的 absolute timer 没走到头，就不断重启保持生命力！
-                if (isContinuousListening) {
-                    Log.d("VoiceInputManager", "Transient error/NoMatch ($error). Restarting chunk underneath absolute timer...")
-                    mainHandler.postDelayed({ startRecognizer() }, 100)
-                } else {
-                    forceStopAndIdle()
-                }
+            // 各种报错如果在 watchdog 的控制期内，我们直接无视并立刻重启引擎续命！
+            if (isContinuousListening && !forceExitAfterResult) {
+                Log.d("VoiceInputManager", "Transient error/NoMatch ($error). Restarting chunk underneath watchdog...")
+                mainHandler.postDelayed({ startRecognizer() }, 50)
             } else {
-                _state.value = VoiceState.Error("识别器错误 ($error)")
                 forceStopAndIdle()
             }
         }
 
         override fun onResults(results: Bundle?) {
-            // 一句话处理结束
-            cancelAbsoluteTimeout()
+            // 一个分片处理结束
             audioRecorder.stopRecording()
             val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
             val text = matches?.firstOrNull() ?: ""
 
             if (text.isNotBlank()) {
-                hasReceivedValidTextThisSession = true
                 val punctuation = if (language == "zh-CN") "，" else ", "
                 val finalSentence = text + punctuation
-                
                 _state.value = VoiceState.Result(finalSentence, currentAudioFile)
                 onFinalResult?.invoke(finalSentence, currentAudioFile)
             }
             
             if (isContinuousListening && !forceExitAfterResult) {
-                // 用户还在听写态。现在重启下一个 chunk。
-                // 规则3：有识别到有效内容之后，安静状态没有后续语音输入 800ms 退出。
-                startAbsoluteTimeout(800L) {
-                    Log.d("VoiceInputManager", "Rule 3: Post-text 800ms strict silence timeout reached.")
-                    forceStopAndIdle()
-                }
+                // Chunk 自动结束（比如网络极好提前返回），而且时间还没到，我们就重启继续录
+                Log.d("VoiceInputManager", "Result arrived early. Re-starting chunk...")
                 startRecognizer()
             } else {
                 Log.d("VoiceInputManager", "Finalized session completely.")
-                forceStopAndIdle()
+                forceStopAndIdle() // 触发 Idle 切出键盘
             }
         }
 
@@ -232,14 +264,8 @@ class VoiceInputManager(private val context: Context) {
             val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
             val text = matches?.firstOrNull() ?: ""
             if (text.isNotBlank()) {
-                hasReceivedValidTextThisSession = true
-                
-                // 只要一有字，就重置规则4：有效内容之后连续无效内容（不管吵不吵）1s后退出
-                startAbsoluteTimeout(1000L) {
-                    Log.d("VoiceInputManager", "Rule 4: Post-valid-text silence/noise timeout (1s). Forcing process.")
-                    stopListeningAndProcess() 
-                }
-                
+                // 收到货真价实的字了，喂食看门狗！
+                lastValidTextTime = System.currentTimeMillis()
                 _state.value = VoiceState.PartialResult(text)
             }
         }
