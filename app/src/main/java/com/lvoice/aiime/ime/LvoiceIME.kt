@@ -215,7 +215,7 @@ class LvoiceIME : InputMethodService(), LifecycleOwner, SavedStateRegistryOwner,
     private fun cleanupSession() {
         hasActiveSession = false
         stateObserverJob?.cancel()
-        voiceInputManager.forceStop()
+        voiceInputManager.forceStopAndIdle()
     }
 
     override fun onDestroy() {
