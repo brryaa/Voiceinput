@@ -1,6 +1,7 @@
 <resources>
-    <string name="app_name">Lboard</string>
-    <string name="ime_name">Lboard AI 输入法</string>
+    <string name="app_name">Lvoice</string>
+    <string name="ime_name">Lvoice AI 输入法</string>
     <string name="ime_subtype_chinese">中文 (拼音)</string>
     <string name="ime_subtype_english">English</string>
+    <string name="default_web_client_id">677432025123-eamepjfngh8botcq182n3rno3ul06hvq.apps.googleusercontent.com</string>
 </resources>
